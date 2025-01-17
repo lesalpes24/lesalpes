@@ -1,11 +1,29 @@
 import { fetch } from 'wix-fetch';
 import wixData from 'wix-data';
+import { getSecret } from 'wix-secrets-backend';
 
-const CLIENT_ID = '131151';
-const CLIENT_SECRET = '713086ed2cfb739062c07ebce0f52005a14f79cc';
+
+let CLIENT_ID, CLIENT_SECRET;
 const TOKEN_URL = 'https://www.strava.com/oauth/token';
 const ACTIVITIES_URL = 'https://www.strava.com/api/v3/athlete/activities';
 const REDIRECT_URI = 'https://www.pbgel.ca'; // Matches your Strava developer settings
+
+// Function to initialize secrets
+async function initializeSecrets() {
+    CLIENT_ID = await getSecret('stravaClientId');
+    CLIENT_SECRET = await getSecret('stravaClientSecret');
+}
+
+// Initialize secrets and ensure they're ready before further operations
+(async function setupSecrets() {
+    try {
+        await initializeSecrets();
+        console.log('Secrets initialized successfully');
+        // Any other startup code that depends on the secrets can go here
+    } catch (error) {
+        console.error('Failed to initialize secrets:', error);
+    }
+})();
 
 /**
  * Generate the Strava OAuth URL
@@ -13,6 +31,7 @@ const REDIRECT_URI = 'https://www.pbgel.ca'; // Matches your Strava developer se
 export function getStravaAuthUrl(userId) {
     return `https://www.strava.com/oauth/authorize?client_id=${CLIENT_ID}&response_type=code&redirect_uri=${REDIRECT_URI}&state=${userId}&scope=read,activity:read&approval_prompt=force`;
 }
+
 
 /**
  * Exchange the authorization code for access and refresh tokens
