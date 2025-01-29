@@ -1,18 +1,94 @@
 import { fetch } from 'wix-fetch';
 import wixData from 'wix-data';
 import { getSecret } from 'wix-secrets-backend';
+import { currentUser } from 'wix-users-backend';
 
 
 let CLIENT_ID, CLIENT_SECRET;
 const TOKEN_URL = 'https://www.strava.com/oauth/token';
 const ACTIVITIES_URL = 'https://www.strava.com/api/v3/athlete/activities';
-const REDIRECT_URI = 'https://www.pbgel.ca'; // Matches your Strava developer settings
+const REDIRECT_URI = 'https://www.lesalpes.ca/account/strava-activities?rc=true'; // Matches your Strava developer settings. Redirect to strava activities page
+const ATHLETE_URL = 'https://www.strava.com/api/v3/athlete';
+
+/**
+ * Get total distance for a specific user from StravaActivities collection.
+ * Distance is stored in meters, so the total is converted to kilometers.
+ * @param {string} userId - The ID of the user
+ * @returns {Promise<number>} Total distance in kilometers
+ */
+export async function getTotalDistanceForUser(userId) {
+    try {
+        // Query StravaActivities collection for the user's activities
+        const result = await wixData.query("StravaActivities")
+            .eq("userId", userId) // Match the userId
+            .find();
+
+        // Check if records exist
+        if (result.items.length === 0) {
+            console.log(`No activities found for user: ${userId}`);
+            return 0;
+        }
+
+        // Sum all distance values (assuming the column name is 'distance' and is stored in meters)
+        const totalDistanceMeters = result.items.reduce((sum, activity) => sum + (activity.distance || 0), 0);
+
+        // Convert meters to kilometers
+        const totalDistanceKm = totalDistanceMeters / 1000;
+
+        console.log(`Total distance for user ${userId}: ${totalDistanceKm.toFixed(2)} km`);
+        return totalDistanceKm;
+    } catch (error) {
+        console.error(`Error fetching total distance for user ${userId}:`, error.message);
+        return 0;
+    }
+}
+
+
+/**
+ * Fetch athlete data from Strava
+ */
+export async function getAthleteData(accessToken) {
+    try {
+        const response = await fetch(ATHLETE_URL, {
+            method: 'GET',
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+            },
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Failed to fetch athlete data:', response.status, errorText);
+            throw new Error(`Failed to fetch athlete data: ${response.status} ${errorText}`);
+        }
+
+        const athleteData = await response.json();
+        console.log('Fetched athlete data:', athleteData);
+
+        return {
+            sex: athleteData.sex || 'N/A',
+            weight: athleteData.weight || null,
+        };
+    } catch (error) {
+        console.error('Error fetching athlete data:', error.message);
+        throw error;
+    }
+}
+
+
 
 // Function to initialize secrets
 async function initializeSecrets() {
-    CLIENT_ID = await getSecret('stravaClientId');
-    CLIENT_SECRET = await getSecret('stravaClientSecret');
+    try {
+        CLIENT_ID = await getSecret('stravaClientId');
+        CLIENT_SECRET = await getSecret('stravaClientSecret');
+    } catch (error) {
+        console.error('Failed to initialize secrets:', error);
+        throw new Error('Could not retrieve secrets');
+    }
 }
+
 
 // Initialize secrets and ensure they're ready before further operations
 (async function setupSecrets() {
@@ -32,12 +108,22 @@ export function getStravaAuthUrl(userId) {
     return `https://www.strava.com/oauth/authorize?client_id=${CLIENT_ID}&response_type=code&redirect_uri=${REDIRECT_URI}&state=${userId}&scope=read,activity:read&approval_prompt=force`;
 }
 
+// Function to calculate the expiration date
+function calculateExpiresAt(monthsToAdd) {
+    const now = new Date(); // Get the current date
+    now.setMonth(now.getMonth() + monthsToAdd); // Add the specified number of months
+    return Math.floor(now.getTime() / 1000); // Convert to a Unix timestamp (seconds since epoch)
+}
+
+function getCurrentDate() {
+    return Math.floor(Date.now() / 1000); // Current time in seconds since epoch
+}
 
 /**
  * Exchange the authorization code for access and refresh tokens
  */
-export async function exchangeToken(code, userId) {
-    console.log('Exchanging token with code:', code);
+export async function exchangeToken(code, uId) {
+    //console.log('Exchanging token with code:', code);
 
     try {
         const response = await fetch(TOKEN_URL, {
@@ -59,21 +145,29 @@ export async function exchangeToken(code, userId) {
         }
 
         const tokenData = await response.json();
-        console.log('Token exchange successful:', tokenData);
+        //console.log('Token exchange successful:', tokenData);
 
+        // Prepare the token record
         const tokenRecord = {
-            _id: userId, // Use userId as the unique identifier
+            _id: uId, // Use userId as the unique identifier
             accessToken: tokenData.access_token,
             refreshToken: tokenData.refresh_token,
             expiresAt: tokenData.expires_at,
         };
 
-        try {
+        // Check if the userId already exists in the Tokens collection
+        const existingRecord = await wixData.get('Tokens', uId);
+
+        if (existingRecord) {
+            // Update the existing row with new token data
+            //console.log(`Updating existing token record for userId: ${uId}`);
             await wixData.update('Tokens', tokenRecord);
             console.log('Token updated in database:', tokenRecord);
-        } catch {
+        } else {
+            // Insert a new row with the token data
+            //console.log(`Inserting new token record for userId: ${uId}`);
             await wixData.insert('Tokens', tokenRecord);
-            console.log('Token saved to database:', tokenRecord);
+            //console.log('Token saved to database:', tokenRecord);
         }
     } catch (error) {
         console.error('Error during token exchange:', error.message);
@@ -81,8 +175,93 @@ export async function exchangeToken(code, userId) {
     }
 }
 
+export async function checkUserToken() {
+    const user = currentUser;
+
+    if (!user.loggedIn) {
+        throw new Error('User must be logged in to check tokens.');
+    }
+
+    const userId = user.id; // Get the user's unique ID from the Members collection
+
+    try {
+        // Query the Tokens collection for the logged-in user's token
+        const result = await wixData.get('Tokens', userId);
+
+        if (result && result.accessToken) {
+            console.log('User has a valid token:', result);
+            return true;
+        } else {
+            console.log('User does not have a token.');
+            return false;
+        }
+    } catch (error) {
+        console.error('Error checking token:', error.message);
+        return false;
+    }
+}
+
 /**
- * Fetch activities from Strava
+ * Save Strava activities into the collection table and check for new activities
+ */
+export async function saveStravaActivities(userId, activities, athleteData) {
+    try {
+        if (!activities || activities.length === 0) {
+            throw new Error('No activities provided to save.');
+        }
+
+        // Fetch existing activities for the user from the collection
+        const existingRecords = await wixData.query('StravaActivities')
+            .eq('userId', userId)
+            .find();
+
+        const existingActivityIds = existingRecords.items.map(record => record.activityId);
+
+        // Filter new activities that are not in the collection
+        const newActivities = activities.filter(activity => !existingActivityIds.includes(activity.id));
+
+        // If no new activities, return false
+        if (newActivities.length === 0) {
+            console.log('No new activities to save.');
+            return { hasNewActivities: false, message: 'No new activities found.' };
+        }
+
+        console.log(`Found ${newActivities.length} new activities to save.`);
+
+        // Insert new activities into the collection
+        const savePromises = newActivities.map(activity => {
+            const activityRecord = {
+                userId: userId,
+                activityId: activity.id,
+                name: activity.name || '',
+                distance: activity.distance || 0,
+                mapImageUrl: activity.map?.summary_polyline || '', // Map image or polyline
+                sport_type: activity.sport_type || '',
+                athleteId: activity.athlete?.id || null,
+                elapsed_time: activity.elapsed_time || 0,
+                start_date: activity.start_date || '',
+                start_date_local: activity.start_date_local || '',
+                timezone: activity.timezone || '',
+                sex: athleteData.sex, // Add athlete sex
+                weight: athleteData.weight, // Add athlete weight
+            };
+
+            return wixData.insert('StravaActivities', activityRecord);
+        });
+
+        // Wait for all inserts to complete
+        await Promise.all(savePromises);
+        console.log('New activities saved successfully.');
+
+        return { hasNewActivities: true, message: 'New activities saved successfully.' };
+    } catch (error) {
+        console.error('Error saving Strava activities:', error.message);
+        return { success: false, hasNewActivities: false, error: error.message };
+    }
+}
+
+/**
+ * Fetch activities from Strava and save them
  */
 export async function getStravaActivities(userId) {
     try {
@@ -92,14 +271,10 @@ export async function getStravaActivities(userId) {
             throw new Error(`No token found for user ID: ${userId}`);
         }
 
-        const currentTime = Math.floor(Date.now() / 1000);
-        if (currentTime >= tokenRecord.expiresAt) {
-            console.log('Access token expired. Refreshing token...');
-            await refreshToken(userId);
-        }
+        const accessToken = tokenRecord.accessToken;
 
-        const updatedTokenRecord = await wixData.get('Tokens', userId);
-        const accessToken = updatedTokenRecord.accessToken;
+        // Fetch athlete data
+        const athleteData = await getAthleteData(accessToken);
 
         const response = await fetch(ACTIVITIES_URL, {
             method: 'GET',
@@ -117,9 +292,14 @@ export async function getStravaActivities(userId) {
 
         const activities = await response.json();
         console.log('Fetched activities:', activities);
+
+        // Save activities to the StravaActivities collection
+        const saveResult = await saveStravaActivities(userId, activities, athleteData);
+        console.log(saveResult.message);
+
         return activities;
     } catch (error) {
-        console.error('Error fetching activities:', error.message);
+        console.error('Error fetching or saving activities:', error.message);
         throw error;
     }
 }
@@ -163,4 +343,86 @@ async function refreshToken(userId) {
 
     await wixData.update('Tokens', updatedTokenRecord);
     console.log('Updated token saved to database:', updatedTokenRecord);
+}
+
+export async function saveStravaTokens(query) {
+    const code = query.code; // Authorization code from Strava
+    const state = query.state; // User ID passed in the "state" parameter
+
+    console.log("OAuth Redirect - Received Query Parameters:", query);
+
+    // Ensure required parameters are present
+    if (!code || !state) {
+        console.warn("Missing 'code' or 'state' parameters in the redirect.");
+        return {
+            success: false,
+            error: 'Missing code or state parameters in the redirect.', // Redirect to homepage if parameters are missing
+        };
+    }
+
+    try {
+        console.log("Exchanging authorization code for tokens...");
+
+        // Exchange the authorization code for tokens
+        const response = await fetch(TOKEN_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                client_id: CLIENT_ID,
+                client_secret: CLIENT_SECRET,
+                code: code,
+                grant_type: 'authorization_code',
+                redirect_uri: REDIRECT_URI,
+            }),
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Token exchange failed:', response.status, errorText);
+            throw new Error(`Token exchange failed: ${response.status} ${errorText}`);
+        }
+
+        const tokenData = await response.json();
+        console.log('Token exchange successful:', tokenData);
+
+        // Prepare the token record
+        const tokenRecord = {
+            _id: state, // Use userId (state) as the unique identifier
+            accessToken: tokenData.access_token,
+            refreshToken: tokenData.refresh_token,
+            expiresAt: tokenData.expires_at,
+            expiresIn: tokenData.expires_in,
+            athleteId: tokenData.athlete.id,
+        };
+
+        // Check if a record with the same athleteId exists in the Tokens collection
+        const existingRecords = await wixData.query('Tokens')
+            .eq('athleteId', tokenData.athlete.id)
+            .find();
+
+        if (existingRecords.items.length > 0) {
+            // Update the existing record
+            const existingRecord = existingRecords.items[0];
+            console.log(`Updating existing token record for athleteId: ${tokenData.athlete.id}`);
+            await wixData.update('Tokens', { ...existingRecord, ...tokenRecord });
+            console.log('Token updated in database:', tokenRecord);
+        } else {
+            // Insert a new record
+            console.log(`Inserting new token record for athleteId: ${tokenData.athlete.id}`);
+            await wixData.insert('Tokens', tokenRecord);
+            console.log('Token saved to database:', tokenRecord);
+        }
+
+        return {
+            success: true,
+            message: 'Successful connection, and data updated in DB!',
+            payload: tokenData,
+        };
+    } catch (error) {
+        console.error("Error during Strava OAuth process:", error);
+        return {
+            success: false,
+            error: 'An error occurred during the OAuth process. Please try again later.',
+        };
+    }
 }
