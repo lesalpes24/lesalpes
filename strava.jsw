@@ -201,6 +201,105 @@ export async function checkUserToken() {
     }
 }
 
+export async function udAppend(userId) {
+    try {
+        // Fetch the user's token
+        const tokenRecord = await wixData.get('Tokens', userId);
+
+        if (!tokenRecord) {
+            throw new Error(`No token found for user ID: ${userId}`);
+        }
+
+        const accessToken = tokenRecord.accessToken;
+
+        // Fetch athlete data (e.g., sex and weight)
+        const athleteResponse = await fetch("https://www.strava.com/api/v3/athlete", {
+            method: "GET",
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+            },
+        });
+
+        if (!athleteResponse.ok) {
+            const errorText = await athleteResponse.text();
+            console.error("Failed to fetch athlete data:", athleteResponse.status, errorText);
+            throw new Error(`Failed to fetch athlete data: ${athleteResponse.status}`);
+        }
+
+        const athleteData = await athleteResponse.json();
+
+        // Fetch activities from Strava
+        const activitiesResponse = await fetch("https://www.strava.com/api/v3/athlete/activities", {
+            method: "GET",
+            headers: {
+                Authorization: `Bearer ${accessToken}`,
+                "Content-Type": "application/json",
+            },
+        });
+
+        if (!activitiesResponse.ok) {
+            const errorText = await activitiesResponse.text();
+            console.error("Failed to fetch activities:", activitiesResponse.status, errorText);
+            throw new Error(`Failed to fetch activities: ${activitiesResponse.status}`);
+        }
+
+        const activities = await activitiesResponse.json();
+
+        if (!activities || activities.length === 0) {
+            console.log("No activities fetched from Strava.");
+            return { success: false, message: "No activities available to save or update." };
+        }
+
+        // Fetch existing activities from the collection
+        const existingRecords = await wixData.query("StravaActivities")
+            .eq("userId", userId)
+            .find();
+
+        const existingActivityIds = existingRecords.items.map(record => record.activityId);
+
+        // Process each activity: insert new or update existing
+        const savePromises = activities.map(activity => {
+            const activityRecord = {
+                userId: userId,
+                activityId: activity.id,
+                name: activity.name || "Unnamed Activity",
+                distance: activity.distance || 0,
+                mapImageUrl: activity.map?.summary_polyline || "",
+                sport_type: activity.sport_type || "Unknown",
+                athleteId: activity.athlete?.id || athleteData.id || null,
+                elapsed_time: activity.elapsed_time || 0,
+                start_date: activity.start_date || "",
+                start_date_local: activity.start_date_local || "",
+                timezone: activity.timezone || "Unknown",
+                sex: athleteData.sex || "Unknown",
+                weight: athleteData.weight || 0,
+            };
+
+            if (existingActivityIds.includes(activity.id)) {
+                console.log(`Updating activity: ${activity.id}`);
+                return wixData.update(
+                    "StravaActivities",
+                    { ...existingRecords.items.find(item => item.activityId === activity.id), ...activityRecord }
+                );
+            } else {
+                console.log(`Inserting new activity: ${activity.id}`);
+                return wixData.insert("StravaActivities", activityRecord);
+            }
+        });
+
+        // Wait for all updates/inserts to complete
+        await Promise.all(savePromises);
+
+        console.log("Activities saved or updated successfully.");
+        return { success: true, message: "Activities processed successfully." };
+    } catch (error) {
+        console.error("Error in udAppend function:", error.message);
+        return { success: false, message: error.message };
+    }
+}
+
+
+
 /**
  * Save Strava activities into the collection table and check for new activities
  */
