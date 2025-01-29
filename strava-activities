@@ -1,6 +1,7 @@
+import wixData from 'wix-data';
 import { getStravaActivities } from 'backend/strava.jsw';
 import wixUsers from 'wix-users';
-import { getStravaAuthUrl, saveStravaTokens, checkUserToken, getTotalDistanceForUser } from 'backend/strava.jsw';
+import { getStravaAuthUrl, saveStravaTokens, checkUserToken, getTotalDistanceForUser, udAppend } from 'backend/strava.jsw';
 import wixLocation from 'wix-location';
 
 
@@ -83,16 +84,8 @@ $w.onReady(() => {
         
     }else if (hasToken){
 
-        // const userId = wixUsers.currentUser.id;
-        // const td = getTotalDistanceForUser(userId);
-        // console.log(td);
-
-        // console.log('hide button.... user has token');
-        // $w('#connectButton1').hide();
-        // $w('#Section1RegularLongtext1').text = "Total Distance so far: " + td;
-
         $w.onReady(async () => {
-            const userId = wixUsers.currentUser.id; // Get the current logged-in user's ID
+            const userId = wixUsers.currentUser.id; 
 
             try {
                 // Await the total distance before using it
@@ -103,132 +96,76 @@ $w.onReady(() => {
                 console.error("Error fetching total distance:", error);
                 $w("#Section1RegularLongtext1").text = "Unable to fetch total distance.";
             }
-});
+        });
     }
 });
 
+$w.onReady(async function () {
+    const user = wixUsers.currentUser;
 
-$w.onReady(() => {
-    console.log('Strava connection 2! User has token...');
+    if (user.loggedIn) {
+        const userId = user.id;
+        const result = await udAppend(userId);
 
-    checkUserToken()
-        .then((result) => {
-            if (result.hasToken) {
-                console.log('Token exists:', result.tokenData);
-
-                // Perform actions with the token (e.g., fetch Strava activities)
-             //   $w('#statusMessage').text = 'You are connected to Strava.';
-             //   $w('#statusMessage').show();
-            } else {
-                console.log('No token found. Prompt user to connect Strava.');
-              //  $w('#statusMessage').text = 'You are not connected to Strava.';
-              //  $w('#statusMessage').show();
-
-                // Optionally redirect to Strava OAuth flow
-              //  $w('#connectStravaButton').show();
-            }
-        })
-        .catch((error) => {
-            console.error('Error checking token:', error);
-          //  $w('#statusMessage').text = 'An error occurred while checking Strava connection.';
-          //  $w('#statusMessage').show();
-        });
-});
-
-
-
-
-
-$w.onReady(() => {
-    
+        if (result.success) {
+            console.log("Activities processed successfully.");
+        } else {
+            console.error("Error processing activities:", result.message);
+        }
+    } else {
+        console.log("User not logged in.");
+    }
 });
 
 
 $w.onReady(async function () {
-
-
-    console.log('Strava connection 3! ... Get activities');
-
     try {
-        const user = wixUsers.currentUser;
-        const userId = user.id;
+        const userId = wixUsers.currentUser.id; // Get the logged-in user's ID
 
-        const activities = await getStravaActivities(userId);
-        console.log('Fetched activities:', activities);
+        // Fetch activities from the "StravaActivities" collection
+        const queryResult = await wixData.query("StravaActivities")
+            .eq("userId", userId) // Match activities to the user
+            .find();
 
+        const activities = queryResult.items; // Get the activities array
 
-        // Calculate total distance and time for the current month
-        const currentMonth = new Date().getMonth();
-        const currentYear = new Date().getFullYear();
-        let totalDistance = 0; // In meters
-        let totalTime = 0; // In seconds
-
-        activities.forEach(activity => {
-            const activityDate = new Date(activity.start_date);
-
-            if (
-                activityDate.getMonth() === currentMonth &&
-                activityDate.getFullYear() === currentYear
-            ) {
-                totalDistance += activity.distance;
-                totalTime += activity.moving_time;
-            }
-        });
-
-        // Display monthly totals
-        const formattedDistance = (totalDistance / 1000).toFixed(2) + ' km'; // Convert to km
-        const formattedTime = formatTime(totalTime); // Format time to hh:mm:ss
-        $w('#monthlyTotalText').text = `This month's total: ${formattedDistance}, ${formattedTime}`;
+        // Filter out activities where distance is 0
+        const filteredActivities = activities.filter(activity => activity.distance > 0);
 
         // Prepare data for the repeater
-        const repeaterData = activities.map(activity => ({
-            _id: activity.id.toString(),
+        const repeaterData = filteredActivities.map(activity => ({
+            _id: activity._id, // Use the unique ID from the database
             name: activity.name || 'Unnamed Activity',
-            distance: (activity.distance / 1000).toFixed(2) + ' km',
-            movingTime: formatTime(activity.moving_time),
-            type: activity.type || 'Unknown Type',
-            mapImageUrl: activity.map?.summary_polyline
-                ? `https://maps.googleapis.com/maps/api/staticmap?size=600x400&path=enc:${activity.map.summary_polyline}&key=AIzaSyCFAFGsRUkqM4MRqoQKqn7o9ithdGgerWs`
-                : null,
+            distance: (activity.distance / 1000).toFixed(2) + ' km', // Convert distance to kilometers
+            elapsedTime: formatTime(activity.elapsed_time || 0), // Format elapsed time
+            sportType: activity.sport_type || 'Unknown Type',
+            location: activity.timezone || 'Unknown Location',
         }));
 
-        // Populate repeater
+        // Bind the repeater's data to the prepared repeaterData
         $w('#repeater1').data = repeaterData;
 
-        // Repeater onItemReady - Updated Section
+        // Handle each row when the repeater loads an item
         $w('#repeater1').onItemReady(($item, itemData) => {
-            // Set text properties
-            $item('#name').text = itemData.name;
-            $item('#distance').text = itemData.distance;
-            $item('#movingTime').text = itemData.movingTime;
-            $item('#type').text = itemData.type;
-
-            // Debugging: Log the mapImageUrl for each activity
-            console.log(`Map Image URL for activity ${itemData._id}:`, itemData.mapImageUrl);
-
-            // // Set the map image source
-            // if (itemData.mapImageUrl) {
-            //     $item('#mapImage1').src = itemData.mapImageUrl; // Assign the URL to the image
-            //     $item('#mapImage1').show(); // Ensure the image is visible
-            // } else {
-            //     $item('#mapImage1').hide(); // Hide the image if the URL is null
-            // }
+            $item('#name').text = itemData.name; // Set the activity name
+            $item('#distance').text = itemData.distance; // Display distance in kilometers
+            $item('#movingTime').text = itemData.elapsedTime; // Display formatted elapsed time
+            $item('#type').text = itemData.sportType; // Display sport type
+            $item('#location').text = itemData.location; // Display timezone or location
         });
-        
+
     } catch (error) {
         console.error('Error loading activities:', error.message);
-        //$w('#errorText').text = 'Failed to load Strava activities. Please try again later.';
+        $w('#errorText').text = 'Failed to load Strava activities. Please try again later.';
     }
-    
 });
 
-// Function to format time from seconds to hh:mm:ss
+/**
+ * Helper function to format elapsed time into hh:mm:ss
+ */
 function formatTime(seconds) {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    return [h, m, s]
-        .map(v => (v < 10 ? '0' + v : v))
-        .filter((v, i) => v !== '00' || i > 0)
-        .join(':');
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
