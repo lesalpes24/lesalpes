@@ -1,164 +1,159 @@
 import wixData from 'wix-data';
-import { getStravaActivities } from 'backend/strava.jsw';
 import wixUsers from 'wix-users';
-import { getStravaAuthUrl, saveStravaTokens, checkUserToken, getTotalDistanceForUser, udAppend } from 'backend/strava.jsw';
 import wixLocation from 'wix-location';
+import {
+    isStravaConnected,
+    refreshToken,
+    getStravaAuthUrl,
+    saveStravaTokens,
+    getTotalDistanceForUser,
+    udAppend,
+} from 'backend/strava.jsw';
 
+$w.onReady(async () => {
+    console.log('Page Loaded...');
+    
+    // Show the loading spinner and hide main content
+    $w('#text203').text = 'Loading';
+    $w('#text203').show();
+    $w("#Section1RegularLongtext1").text = '';
+    $w('#connectButton1').hide();
 
-$w.onReady(() => {
+    const userId = wixUsers.currentUser.id; // Get logged-in user ID
+    const query = wixLocation.query; // Get query parameters
 
-    //user strava connection active
-    const hasToken = checkUserToken();
-
-    console.log('READY 1...');
-
-    // Get the query parameters from the URL
-    const query = wixLocation.query;
-
-    if(!hasToken && query.rc && query.code && query.state){
-
-        // Check if the 'rc' parameter is present
-        if (query.rc) {
-            // Example: If 'rc=true', display a success message
-            if (query.rc === 'true') {
-                console.log('Strava connection was successful!');
-            //    $w('#statusMessage').text = 'Strava connection was successful!';
-            //    $w('#statusMessage').show();
-
-
-                // Check if `code` and `state` are present in the query
-                if (query.code && query.state) {
-                    console.log('Processing Strava connection...');
-                //   $w('#statusMessage').text = 'Processing Strava connection...';
-                //   $w('#statusMessage').show();
-
-                    //Call the backend to save tokens
-                    saveStravaTokens(query)
-                        .then((response) => {
-                            if (response.success) {
-                                console.log('Strava connection successful!');
-                //               $w('#statusMessage').text = 'Strava connection successful!';
-                //               $w('#statusMessage').show();
-                            } else {
-                                console.log('Failed to save Strava tokens.');
-                //               $w('#statusMessage').text = 'Failed to save Strava tokens.';
-                //               $w('#statusMessage').show();
-                            }
-                        })
-                        .catch((error) => {
-                            console.error('Error saving Strava tokens:', error);
-                //          $w('#statusMessage').text = 'An error occurred while connecting to Strava.';
-                //          $w('#statusMessage').show();
-                        });
-                } else {
-                    console.log('Invalid or missing query parameters.');
-                //   $w('#statusMessage').text = 'Invalid or missing query parameters.';
-                //   $w('#statusMessage').show();
-                }
-
-            } else {
-                console.log('Failed to connect with Strava.');
-            //    $w('#statusMessage').text = 'Failed to connect with Strava.';
-            //    $w('#statusMessage').show();
-            }
-        } else {
-                console.log('If no rc parameter, hide the status message');
-            // If no 'rc' parameter, hide the status message
-        //    $w('#statusMessage').hide();
-        }
-    }else if(!hasToken) {
-        console.log('Please, click "connect" to Strava!');
-        $w("#connectButton1").show();
-        $w('#Section1RegularLongtext1').text = "Connect to Strava and follow your progress";
-        $w('#connectButton1').onClick(async () => {
-            try {
-                const userId = wixUsers.currentUser.id;
-                const authUrl = await getStravaAuthUrl(userId);
-                wixLocation.to(authUrl);
-            } catch (error) {
-                console.error('Error generating Strava OAuth URL:', error);
-            }
-        });
-        
-        
-        
-    }else if (hasToken){
-
-        $w.onReady(async () => {
-            const userId = wixUsers.currentUser.id; 
-
-            try {
-                // Await the total distance before using it
-                const totalDistance = await getTotalDistanceForUser(userId);
-                $w("#Section1RegularLongtext1").text = `Total Distance so far: ${totalDistance.toFixed(2)} based on the past 30 activities!`;
-                $w('#connectButton1').hide();
-            } catch (error) {
-                console.error("Error fetching total distance:", error);
-                $w("#Section1RegularLongtext1").text = "Unable to fetch total distance.";
-            }
-        });
-    }
-});
-
-$w.onReady(async function () {
-    const user = wixUsers.currentUser;
-
-    if (user.loggedIn) {
-        const userId = user.id;
-        const result = await udAppend(userId);
-
-        if (result.success) {
-            console.log("Activities processed successfully.");
-        } else {
-            console.error("Error processing activities:", result.message);
-        }
-    } else {
-        console.log("User not logged in.");
-    }
-});
-
-
-$w.onReady(async function () {
     try {
-        const userId = wixUsers.currentUser.id; // Get the logged-in user's ID
+        // Check Strava token status
+        const hasToken = await isStravaConnected();
+        console.log('Token check result:', hasToken);
 
-        // Fetch activities from the "StravaActivities" collection
-        const queryResult = await wixData.query("StravaActivities")
-            .eq("userId", userId) // Match activities to the user
-            .find();
+        if (hasToken.success) {
+            console.log('User connected to Strava. Refreshing token...');
+            await handleConnectedUser(userId);
 
-        const activities = queryResult.items; // Get the activities array
+        } else if (query.rc && query.code && query.state) {
+            console.log('Processing Strava connection callback...');
+            await handleStravaCallback(query);
 
-        // Filter out activities where distance is 0
-        const filteredActivities = activities.filter(activity => activity.distance > 0);
-
-        // Prepare data for the repeater
-        const repeaterData = filteredActivities.map(activity => ({
-            _id: activity._id, // Use the unique ID from the database
-            name: activity.name || 'Unnamed Activity',
-            distance: (activity.distance / 1000).toFixed(2) + ' km', // Convert distance to kilometers
-            elapsedTime: formatTime(activity.elapsed_time || 0), // Format elapsed time
-            sportType: activity.sport_type || 'Unknown Type',
-            location: activity.timezone || 'Unknown Location',
-        }));
-
-        // Bind the repeater's data to the prepared repeaterData
-        $w('#repeater1').data = repeaterData;
-
-        // Handle each row when the repeater loads an item
-        $w('#repeater1').onItemReady(($item, itemData) => {
-            $item('#name').text = itemData.name; // Set the activity name
-            $item('#distance').text = itemData.distance; // Display distance in kilometers
-            $item('#movingTime').text = itemData.elapsedTime; // Display formatted elapsed time
-            $item('#type').text = itemData.sportType; // Display sport type
-            $item('#location').text = itemData.location; // Display timezone or location
-        });
+        } else {
+            console.log('User not connected to Strava. Prompting to connect...');
+            handleNotConnected(userId);
+        }
 
     } catch (error) {
-        console.error('Error loading activities:', error.message);
-        $w('#errorText').text = 'Failed to load Strava activities. Please try again later.';
+        console.error('Error handling Strava integration:', error.message);
+        $w('#text203').text = 'An unexpected error occurred. Please try again later.';
+    } finally {
+        // Hide loading spinner and show main content
+        $w('#text203').text = '';
     }
 });
+
+/**
+ * Handle case where user is already connected to Strava
+ */
+async function handleConnectedUser(userId) {
+    try {
+        const refreshResult = await refreshToken(userId);
+        if (!refreshResult.success) {
+            console.error('Failed to refresh token:', refreshResult.error);
+            $w('#text203').text = 'Failed to refresh Strava connection. Please reconnect.';
+            return;
+        }
+
+        console.log('Token refreshed successfully:', refreshResult);
+
+        const totalDistance = await getTotalDistanceForUser(userId);
+        $w("#Section1RegularLongtext1").text = `Total Distance so far: ${totalDistance.toFixed(2)} km based on the past 30 activities!`;
+        $w('#connectButton1').hide();
+
+        await loadActivities(userId);
+
+    } catch (error) {
+        console.error('Error handling connected user:', error.message);
+        $w("#Section1RegularLongtext1").text = "Unable to fetch data.";
+    }
+}
+
+/**
+ * Handle Strava callback after user initiates connection
+ */
+async function handleStravaCallback(query) {
+    try {
+        if (query.rc === 'true') {
+            $w('#text203').text = 'Strava connection successful!';
+            $w('#text203').show();
+
+            const response = await saveStravaTokens(query);
+            if (response.success) {
+                console.log('Strava tokens saved successfully.');
+            } else {
+                console.error('Failed to save Strava tokens:', response.error);
+                $w('#text203').text = 'Failed to save Strava tokens.';
+            }
+        } else {
+            console.error('Failed to connect with Strava.');
+            $w('#text203').text = 'Failed to connect with Strava.';
+            $w('#text203').show();
+        }
+    } catch (error) {
+        console.error('Error processing Strava callback:', error.message);
+        $w('#text203').text = 'An error occurred while connecting to Strava.';
+    }
+}
+
+/**
+ * Handle case where user is not connected to Strava
+ */
+function handleNotConnected(userId) {
+    $w("#connectButton1").show();
+    $w('#Section1RegularLongtext1').text = "Connect to Strava and follow your progress";
+
+    $w('#connectButton1').onClick(async () => {
+        try {
+            const authUrl = await getStravaAuthUrl(userId);
+            wixLocation.to(authUrl);
+        } catch (error) {
+            console.error('Error generating Strava OAuth URL:', error);
+        }
+    });
+}
+
+/**
+ * Fetch and display activities from the StravaActivities collection
+ */
+async function loadActivities(userId) {
+    try {
+        const queryResult = await wixData.query("StravaActivities")
+            .eq("userId", userId)
+            .find();
+
+        const activities = queryResult.items.filter(activity => activity.distance > 0);
+
+        const repeaterData = activities.map(activity => ({
+            _id: activity._id,
+            name: activity.name || 'Unnamed Activity',
+            distance: (activity.distance / 1000).toFixed(2) + ' km',
+            elapsedTime: formatTime(activity.elapsed_time || 0),
+            sportType: activity.sport_type || 'Unknown Type',
+            location: extractCity(activity.timezone),
+            startDateLocal: formatDate(activity.start_date_local),
+        }));
+
+        $w('#repeater1').data = repeaterData;
+        $w('#repeater1').onItemReady(($item, itemData) => {
+            $item('#name').text = itemData.name;
+            $item('#distance').text = itemData.distance;
+            $item('#activityDate').text = itemData.startDateLocal;
+            $item('#movingTime').text = itemData.elapsedTime;
+            $item('#type').text = itemData.sportType;
+            $item('#text202').text = itemData.location;
+        });
+    } catch (error) {
+        console.error('Error loading activities:', error.message);
+        $w('#text203').text = 'Failed to load activities. Please try again later.';
+    }
+}
 
 /**
  * Helper function to format elapsed time into hh:mm:ss
@@ -168,4 +163,29 @@ function formatTime(seconds) {
     const mins = Math.floor((seconds % 3600) / 60);
     const secs = seconds % 60;
     return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Helper function to format start_date_local into a readable format
+ */
+function formatDate(dateString) {
+    if (!dateString) return 'Unknown Date';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', {
+        weekday: 'short',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+}
+
+/**
+ * Helper function to extract the city name from a timezone string
+ */
+function extractCity(timezone) {
+    if (!timezone) return 'Unknown City';
+    const parts = timezone.split('/');
+    return parts.length > 1 ? parts[1] : timezone;
 }
