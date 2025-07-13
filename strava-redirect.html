@@ -7,13 +7,18 @@
 <body>
   <p>Redirecting to Les Alpes app…</p>
   <script>
-    const code = new URLSearchParams(window.location.search).get("code");
-    if (code) {
-      const redirectURL = `lesalpes://strava?code=${code}`;
-      window.location.href = redirectURL; // ✅ more reliable on mobile
-    } else {
-      document.body.innerHTML = "<h2>No Strava code found in URL.</h2>";
-    }
-  </script>
+  const code = new URLSearchParams(window.location.search).get("code");
+
+  if (code) {
+    const redirectURL = `lesalpes://strava?code=${code}`;
+    document.body.innerHTML += `<p>Redirecting in 1 second...</p>`;
+
+    setTimeout(() => {
+      window.location.replace(redirectURL);
+    }, 1000); // ✅ iOS handles it better with delay
+  } else {
+    document.body.innerHTML = "<h2>No Strava code found in URL.</h2>";
+  }
+</script>
 </body>
 </html>
