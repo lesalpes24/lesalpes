@@ -1,23 +1,20 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Les Alpes Android Redirect</title>
-  <script>
-    // Preserve query params from Strava (e.g., ?code=XYZ)
-    const qs = window.location.search || "";
-    // Redirect into your Android app’s deep link
-    const appUri = "lesalpes://oauth2redirect/strava" + qs;
-
-    // Auto-redirect to app if there's a code or error param
-    if (qs.includes("code") || qs.includes("error")) {
-      window.location.replace(appUri);
-    } else {
-      document.body.innerHTML = "<h3>Missing code parameter.</h3>";
-    }
-  </script>
+  <meta charset="UTF-8" />
+  <title>Redirecting…</title>
 </head>
 <body>
-  <p>Redirecting to Les Alpes Android app…</p>
+  <p>Redirecting to Les Alpes app…</p>
+  <script>
+    const code = new URLSearchParams(window.location.search).get("code");
+    if (code) {
+      // ← must match your Android intent filter below
+      const redirectURL = `lesalpes://oauth2redirect/strava?code=${encodeURIComponent(code)}`;
+      setTimeout(() => { window.location.replace(redirectURL); }, 800);
+    } else {
+      document.body.innerHTML = "<h2>No Strava code found in URL.</h2>";
+    }
+  </script>
 </body>
 </html>
