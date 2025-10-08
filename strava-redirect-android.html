@@ -1,26 +1,19 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>Redirecting…</title>
-</head>
+<head><meta charset="utf-8"/><title>Redirecting…</title></head>
 <body>
   <p>Redirecting to Les Alpes app…</p>
   <script>
-    const params = new URLSearchParams(window.location.search);
-    const code  = params.get("code");
-    const state = params.get("state");
-    const error = params.get("error");
-
+    const p = new URLSearchParams(window.location.search);
+    const code  = p.get("code");
+    const state = p.get("state");
     const base = "lesalpes://oauth2redirect/strava";
-    const q = new URLSearchParams();
-    if (error) q.set("error", error);
-    if (code)  q.set("code", code);
-    if (state) q.set("state", state);
-    if (!error && !code) q.set("error", "access_denied");
-
-    const redirectURL = `${base}?${q.toString()}`;
-    window.location.replace(redirectURL);
+    if (code) {
+      const url = `${base}?code=${encodeURIComponent(code)}${state ? `&state=${encodeURIComponent(state)}` : ""}`;
+      window.location.replace(url);
+    } else {
+      document.body.innerHTML = "<h2>No Strava code found.</h2>";
+    }
   </script>
 </body>
 </html>
