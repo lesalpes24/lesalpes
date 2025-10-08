@@ -7,14 +7,20 @@
 <body>
   <p>Redirecting to Les Alpes app…</p>
   <script>
-    const code = new URLSearchParams(window.location.search).get("code");
-    if (code) {
-      // ← must match your Android intent filter below
-      const redirectURL = `lesalpes://oauth2redirect/strava?code=${encodeURIComponent(code)}`;
-      setTimeout(() => { window.location.replace(redirectURL); }, 800);
-    } else {
-      document.body.innerHTML = "<h2>No Strava code found in URL.</h2>";
-    }
+    const params = new URLSearchParams(window.location.search);
+    const code  = params.get("code");
+    const state = params.get("state");
+    const error = params.get("error");
+
+    const base = "lesalpes://oauth2redirect/strava";
+    const q = new URLSearchParams();
+    if (error) q.set("error", error);
+    if (code)  q.set("code", code);
+    if (state) q.set("state", state);
+    if (!error && !code) q.set("error", "access_denied");
+
+    const redirectURL = `${base}?${q.toString()}`;
+    window.location.replace(redirectURL);
   </script>
 </body>
 </html>
