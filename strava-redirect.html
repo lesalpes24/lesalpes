@@ -1,24 +1,41 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Redirecting…</title>
+  <meta charset="utf-8"/>
+  <title>Les Alpes – Strava Redirect</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <style>body{background:#0b0b0b;color:#fff;font:16px -apple-system,system-ui} .wrap{padding:24px;}</style>
 </head>
 <body>
-  <p>Redirecting to Les Alpes app…</p>
+  <div class="wrap">
+    <p>Completing Strava login…</p>
+  </div>
   <script>
-  const code = new URLSearchParams(window.location.search).get("code");
+    (function () {
+      const params = new URLSearchParams(window.location.search);
+      const code  = params.get('code');
+      const state = params.get('state');
+      const error = params.get('error');
 
-  if (code) {
-    const redirectURL = `lesalpes://strava?code=${code}`;
-    document.body.innerHTML += `<p>Redirecting in 1 second...</p>`;
+      // Always carry state through for CSRF verification
+      const destBase = 'lesalpes://strava';
 
-    setTimeout(() => {
-      window.location.replace(redirectURL);
-    }, 1000); // ✅ iOS handles it better with delay
-  } else {
-    document.body.innerHTML = "<h2>No Strava code found in URL.</h2>";
-  }
-</script>
+      function go(url) {
+        // Use replace to avoid back button weirdness
+        window.location.replace(url);
+      }
+
+      if (error) {
+        go(`${destBase}?error=${encodeURIComponent(error)}${state ? `&state=${encodeURIComponent(state)}` : ''}`);
+        return;
+      }
+      if (code) {
+        go(`${destBase}?code=${encodeURIComponent(code)}${state ? `&state=${encodeURIComponent(state)}` : ''}`);
+        return;
+      }
+      // Fallback: mark as canceled if nothing present
+      go(`${destBase}?error=access_denied${state ? `&state=${encodeURIComponent(state)}` : ''}`);
+    })();
+  </script>
 </body>
 </html>
