@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <title>Les Alpes – Strava Redirect</title>
+  <title>Activity Buzzer – Strava Redirect</title>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <style>body{background:#0b0b0b;color:#fff;font:16px -apple-system,system-ui} .wrap{padding:24px;}</style>
+  <style>body{background:#0b0b0b;color:#fff;font:16px -apple-system,system-ui}.wrap{padding:24px;}</style>
 </head>
 <body>
   <div class="wrap">
@@ -12,29 +12,25 @@
   </div>
   <script>
     (function () {
-      const params = new URLSearchParams(window.location.search);
-      const code  = params.get('code');
-      const state = params.get('state');
-      const error = params.get('error');
+      const p = new URLSearchParams(window.location.search);
+      const code  = p.get('code');
+      const state = p.get('state');
+      const error = p.get('error');
 
-      // Always carry state through for CSRF verification
-      const destBase = 'lesalpes://strava';
+      // This MUST match your Info.plist URL scheme and the scheme used in ASWebAuthenticationSession:
+      const destBase = 'activitybuzzer://oauth/callback';
 
-      function go(url) {
-        // Use replace to avoid back button weirdness
-        window.location.replace(url);
-      }
+      function go(url) { window.location.replace(url); }
 
-      if (error) {
-        go(`${destBase}?error=${encodeURIComponent(error)}${state ? `&state=${encodeURIComponent(state)}` : ''}`);
-        return;
-      }
-      if (code) {
-        go(`${destBase}?code=${encodeURIComponent(code)}${state ? `&state=${encodeURIComponent(state)}` : ''}`);
-        return;
-      }
-      // Fallback: mark as canceled if nothing present
-      go(`${destBase}?error=access_denied${state ? `&state=${encodeURIComponent(state)}` : ''}`);
+      const qs = (obj) => Object.entries(obj)
+        .filter(([,v]) => v != null)
+        .map(([k,v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+        .join('&');
+
+      if (error) { return go(`${destBase}?${qs({ error, state })}`); }
+      if (code)  { return go(`${destBase}?${qs({ code, state })}`); }
+
+      go(`${destBase}?${qs({ error: 'access_denied', state })}`);
     })();
   </script>
 </body>
