@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Les Alpes – Strava Redirect</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <style>body{background:#0b0b0b;color:#fff;font:16px -apple-system,system-ui} .wrap{padding:24px;}</style>
+</head>
+<body>
+  <div class="wrap">
+    <p>Completing Strava login…</p>
+  </div>
+  <script>
+    (function () {
+      const params = new URLSearchParams(window.location.search);
+      const code  = params.get('code');
+      const state = params.get('state');
+      const error = params.get('error');
+
+      // Always carry state through for CSRF verification
+      const destBase = 'lesalpes://strava';
+
+      function go(url) {
+        // Use replace to avoid back button weirdness
+        window.location.replace(url);
+      }
+
+      if (error) {
+        go(`${destBase}?error=${encodeURIComponent(error)}${state ? `&state=${encodeURIComponent(state)}` : ''}`);
+        return;
+      }
+      if (code) {
+        go(`${destBase}?code=${encodeURIComponent(code)}${state ? `&state=${encodeURIComponent(state)}` : ''}`);
+        return;
+      }
+      // Fallback: mark as canceled if nothing present
+      go(`${destBase}?error=access_denied${state ? `&state=${encodeURIComponent(state)}` : ''}`);
+    })();
+  </script>
+</body>
+</html>
